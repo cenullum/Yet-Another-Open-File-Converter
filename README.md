@@ -2,6 +2,10 @@
 
 A simple tool to convert many image and video files at once. I made this to handle basic file tasks with a simple interface.
 
+<img width="1146" height="851" alt="image" src="https://github.com/user-attachments/assets/77849e36-8e64-4679-aa04-a65fbf4114d1" />
+
+
+
 ## What it does
 
 ### Images
