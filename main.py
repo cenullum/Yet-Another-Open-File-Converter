@@ -132,6 +132,11 @@ class SettingsDialog(QDialog):
         self.btn_github = QPushButton("GitHub Repository")
         self.btn_github.clicked.connect(self.open_link)
         help_vbox.addWidget(self.btn_github)
+
+        self.btn_donate = QPushButton("Support the Project ☕")
+        self.btn_donate.setObjectName("DonationButton")
+        self.btn_donate.clicked.connect(self.open_donation)
+        help_vbox.addWidget(self.btn_donate)
         
         self.btn_log_folder = QPushButton("View Log Folder")
         self.btn_log_folder.setObjectName("SettingsButton")
@@ -174,6 +179,9 @@ class SettingsDialog(QDialog):
 
     def open_link(self):
         QDesktopServices.openUrl(QUrl("https://github.com/cenullum/Yet-Another-Open-File-Converter"))
+
+    def open_donation(self):
+        QDesktopServices.openUrl(QUrl("https://cenullum.com/donation"))
 
     def open_logs(self):
         log_dir = app_logger.get_log_dir()

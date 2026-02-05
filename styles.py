@@ -44,6 +44,14 @@ QPushButton:pressed {
     background-color: #2a5a8e;
 }
 
+QPushButton#DonationButton {
+    background-color: #f39c12;
+}
+
+QPushButton#DonationButton:hover {
+    background-color: #e67e22;
+}
+
 QPushButton#SettingsButton {
     background-color: #444444;
 }
