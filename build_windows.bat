@@ -44,6 +44,7 @@ echo [3/5] Handling FFmpeg...
 set "FFMPEG_ZIP=%BUILD_DIR%\ffmpeg.zip"
 set "FFMPEG_BIN_DIR=%BUILD_DIR%\ffmpeg_bin"
 set "FFMPEG_EXE=%BUILD_DIR%\ffmpeg.exe"
+set "FFPROBE_EXE=%BUILD_DIR%\ffprobe.exe"
 
 if not exist "%FFMPEG_EXE%" (
     echo Downloading FFmpeg from gyan.dev...
@@ -52,11 +53,16 @@ if not exist "%FFMPEG_EXE%" (
     echo Extracting FFmpeg...
     powershell -Command "Expand-Archive -Path '%FFMPEG_ZIP%' -DestinationPath '%FFMPEG_BIN_DIR%' -Force"
     
-    :: Find ffmpeg.exe in the extracted folders and move it to BUILD_DIR
-    echo Locating ffmpeg.exe...
+    :: Find ffmpeg.exe and ffprobe.exe in the extracted folders and move them to BUILD_DIR
+    echo Locating ffmpeg binaries...
     for /r "%FFMPEG_BIN_DIR%" %%f in (ffmpeg.exe) do (
         if exist "%%f" (
             copy /y "%%f" "%FFMPEG_EXE%"
+        )
+    )
+    for /r "%FFMPEG_BIN_DIR%" %%f in (ffprobe.exe) do (
+        if exist "%%f" (
+            copy /y "%%f" "%FFPROBE_EXE%"
         )
     )
     
@@ -76,6 +82,7 @@ set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%settings_manager.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%converter_worker.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%logger.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%FFMPEG_EXE%;."
+set ADD_DATA=%ADD_DATA% --add-data "%FFPROBE_EXE%;."
 
 :: Check for icon.ico in the root directory
 set "ICON_ARG="
@@ -91,22 +98,16 @@ pyinstaller --noconsole --onefile --clean ^
     --name "%APP_NAME%" ^
     --workpath "%BUILD_DIR%\work" ^
     --specpath "%BUILD_DIR%" ^
-    --distpath "%BUILD_DIR%\dist" ^
+    --distpath "%DESKTOP_DIR%" ^
     %ADD_DATA% ^
     %ICON_ARG% ^
     "%BASE_DIR%main.py"
 
 echo [5/5] Finalizing...
-set "RESULT_EXE=%BUILD_DIR%\dist\%APP_NAME%.exe"
-
-if exist "%RESULT_EXE%" (
+if exist "%DESKTOP_DIR%\%APP_NAME%.exe" (
     echo ======================================================
     echo SUCCESS! 
-    echo Copying executable to Desktop...
-    copy /y "%RESULT_EXE%" "%DESKTOP_DIR%\"
-    
-    echo ======================================================
-    echo DONE! Your executable is on your Desktop:
+    echo Your executable is on your Desktop:
     echo "%DESKTOP_DIR%\%APP_NAME%.exe"
     echo ======================================================
 ) else (

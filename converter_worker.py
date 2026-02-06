@@ -2,6 +2,7 @@ import os
 import subprocess
 import re
 import math
+import sys
 from PySide6.QtCore import QThread, Signal
 from logger import app_logger
 
@@ -24,6 +25,19 @@ class ConverterWorker(QThread):
         self.source_folder_name = source_folder_name
         self.is_cancelled = False
         app_logger.info(f"ConverterWorker initialized. Files: {len(files)}, Folder: {source_folder_name}")
+
+    def get_bin_path(self, bin_name):
+        """Resolve path to bundled binaries if running in a PyInstaller bundle."""
+        full_bin = bin_name
+        if os.name == 'nt' and not bin_name.endswith('.exe'):
+            full_bin += '.exe'
+        
+        if getattr(sys, 'frozen', False):
+            bundle_path = os.path.join(sys._MEIPASS, full_bin)
+            if os.path.exists(bundle_path):
+                return bundle_path
+        
+        return full_bin # Fallback to system PATH
 
     def run(self):
         """
@@ -106,28 +120,53 @@ class ConverterWorker(QThread):
         self.finished.emit(is_success, summary)
 
     def process_image(self, input_path, output_path):
-        """Convert image using ImageMagick."""
+        """Convert image using FFmpeg."""
         quality = self.settings.get('image_quality', '80')
         resize = self.settings.get('image_resize', '0')
         grayscale = self.settings.get('image_grayscale', 'false') == 'true'
         preserve_md = self.settings.get('image_metadata', 'true') == 'true'
         
-        cmd = ['convert', input_path]
-        if not preserve_md: cmd.append('-strip')
-        if grayscale: cmd.extend(['-colorspace', 'Gray'])
+        ffmpeg_bin = self.get_bin_path('ffmpeg')
+        cmd = [ffmpeg_bin, '-y', '-i', input_path]
+        
+        if not preserve_md:
+            cmd.extend(['-map_metadata', '-1'])
+        
+        # Build filter graph
+        vf = []
+        if grayscale:
+            vf.append('format=gray')
+        
         if resize != '0' and resize.isdigit():
-            cmd.extend(['-resize', f'{resize}x{resize}>'])
-        if self.target_img_format in ['jpg', 'webp']:
-            cmd.extend(['-quality', quality])
+            # Scale longest side to 'resize' while maintaining aspect ratio, and only if original is larger
+            vf.append(f"scale='if(gt(iw,ih),min({resize},iw),-1)':'if(gt(ih,iw),min({resize},ih),-1)'")
+        
+        if vf:
+            cmd.extend(['-vf', ','.join(vf)])
+            
+        # Format specific quality settings
+        if self.target_img_format == 'webp':
+            cmd.extend(['-q:v', quality])
+        elif self.target_img_format in ['jpg', 'jpeg']:
+            # FFmpeg uses 1-31 scale for JPEG, where 1 is best. Map 1-100 to 31-1.
+            try:
+                q_val = int(quality)
+                mapped_q = max(1, min(31, int(31 - (q_val * 30 / 100))))
+                cmd.extend(['-q:v', str(mapped_q)])
+            except:
+                cmd.extend(['-q:v', '5'])
+            
         cmd.append(output_path)
         
+        app_logger.info(f"Image conversion command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result.returncode == 0
 
     def get_video_duration(self, path):
         """Get video duration in seconds using ffprobe."""
         try:
-            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
+            ffprobe_bin = self.get_bin_path('ffprobe')
+            cmd = [ffprobe_bin, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path]
             result = subprocess.run(cmd, capture_output=True, text=True)
             return float(result.stdout.strip())
         except:
@@ -144,7 +183,8 @@ class ConverterWorker(QThread):
         
         duration = self.get_video_duration(input_path)
         
-        cmd = ['ffmpeg', '-i', input_path, '-progress', 'pipe:1', '-nostats']
+        ffmpeg_bin = self.get_bin_path('ffmpeg')
+        cmd = [ffmpeg_bin, '-i', input_path, '-progress', 'pipe:1', '-nostats']
         
         if preserve_md: cmd.extend(['-map_metadata', '0'])
         else: cmd.extend(['-map_metadata', '-1'])
