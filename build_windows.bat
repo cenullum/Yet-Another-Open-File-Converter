@@ -98,17 +98,17 @@ pyinstaller --noconsole --onefile --clean ^
     --name "%APP_NAME%" ^
     --workpath "%BUILD_DIR%\work" ^
     --specpath "%BUILD_DIR%" ^
-    --distpath "%DESKTOP_DIR%" ^
+    --distpath "%BASE_DIR%" ^
     %ADD_DATA% ^
     %ICON_ARG% ^
     "%BASE_DIR%main.py"
 
 echo [5/5] Finalizing...
-if exist "%DESKTOP_DIR%\%APP_NAME%.exe" (
+if exist "%BASE_DIR%%APP_NAME%.exe" (
     echo ======================================================
     echo SUCCESS! 
-    echo Your executable is on your Desktop:
-    echo "%DESKTOP_DIR%\%APP_NAME%.exe"
+    echo Your executable is in the project root:
+    echo "%BASE_DIR%%APP_NAME%.exe"
     echo ======================================================
 ) else (
     echo [ERROR] Build failed. Check the output above for details.
