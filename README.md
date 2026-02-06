@@ -44,7 +44,8 @@ or download appimage from releases page.
 
 ## How to build
 
-Use `build_appimage.sh` to build appimage.
+Use `build_appimage.sh` to build appimage for Linux.
+Use `build_windows.bat` to build executable for Windows.
 
 ## Support
 
