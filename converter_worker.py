@@ -5,6 +5,7 @@ import math
 import sys
 from PySide6.QtCore import QThread, Signal
 from logger import app_logger
+from config import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS
 
 class ConverterWorker(QThread):
     """
@@ -83,12 +84,12 @@ class ConverterWorker(QThread):
 
                 ext = os.path.splitext(file_path)[1].lower()
                 
-                if ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff']:
+                if ext in SUPPORTED_IMAGE_EXTENSIONS:
                     out_path = f"{base_no_ext}_converted.{self.target_img_format}"
                     if output_base_dir:
                         out_path = os.path.join(output_base_dir, f"{os.path.basename(base_no_ext)}.{self.target_img_format}")
                     success = self.process_image(file_path, out_path)
-                elif ext in ['.mp4', '.avi', '.mkv', '.mov', '.webm', '.flv', '.wmv', '.gif']:
+                elif ext in SUPPORTED_VIDEO_EXTENSIONS:
                     out_path = f"{base_no_ext}_converted.{self.target_vid_format}"
                     if output_base_dir:
                         out_path = os.path.join(output_base_dir, f"{os.path.basename(base_no_ext)}.{self.target_vid_format}")
@@ -144,10 +145,14 @@ class ConverterWorker(QThread):
         if vf:
             cmd.extend(['-vf', ','.join(vf)])
             
-        # Format specific quality settings
-        if self.target_img_format == 'webp':
-            cmd.extend(['-q:v', quality])
-        elif self.target_img_format in ['jpg', 'jpeg']:
+        # Format-specific encoder and quality settings
+        fmt = self.target_img_format.lower()
+        
+        if fmt == 'webp':
+            cmd.extend(['-c:v', 'libwebp', '-q:v', quality])
+        
+        elif fmt in ['jpg', 'jpeg']:
+            cmd.extend(['-c:v', 'mjpeg'])
             # FFmpeg uses 1-31 scale for JPEG, where 1 is best. Map 1-100 to 31-1.
             try:
                 q_val = int(quality)
@@ -155,11 +160,60 @@ class ConverterWorker(QThread):
                 cmd.extend(['-q:v', str(mapped_q)])
             except:
                 cmd.extend(['-q:v', '5'])
+        
+        elif fmt == 'png':
+            cmd.extend(['-c:v', 'png'])
+        
+        elif fmt == 'bmp':
+            cmd.extend(['-c:v', 'bmp'])
+        
+        elif fmt in ['tiff', 'tif']:
+            cmd.extend(['-c:v', 'tiff'])
+        
+        elif fmt == 'avif':
+            try:
+                crf = max(0, min(63, 63 - int(quality) * 63 // 100))
+                cmd.extend(['-c:v', 'libaom-av1', '-crf', str(crf)])
+            except:
+                cmd.extend(['-c:v', 'libaom-av1', '-crf', '30'])
+        
+
+        elif fmt == 'ico':
+            # ICO format - scale to 256x256 max and use ICO format
+            if resize == '0' or not resize.isdigit() or int(resize) > 256:
+                if vf:
+                    cmd[-1] = cmd[-1] + ",scale='min(256,iw)':'min(256,ih)'"
+                else:
+                    cmd.extend(['-vf', "scale='min(256,iw)':'min(256,ih)'"])
+            cmd.extend(['-c:v', 'bmp', '-f', 'ico'])
+        
+        elif fmt == 'tga':
+            cmd.extend(['-c:v', 'targa'])
+        
+        elif fmt in ['ppm', 'pgm', 'pbm', 'pnm']:
+            # Portable anymap formats - use image2 format
+            cmd.extend(['-f', 'image2', '-c:v', 'ppm'])
+        
+        elif fmt == 'gif':
+            cmd.extend(['-c:v', 'gif'])
+        
+        elif fmt in ['exr', 'hdr']:
+            # High dynamic range formats
+            if fmt == 'exr':
+                cmd.extend(['-c:v', 'exr'])
+            else:
+                # HDR uses Radiance format
+                cmd.extend(['-pix_fmt', 'rgb48le'])
+
             
         cmd.append(output_path)
         
         app_logger.info(f"Image conversion command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            app_logger.error(f"FFmpeg error: {result.stderr}")
+        
         return result.returncode == 0
 
     def get_video_duration(self, path):

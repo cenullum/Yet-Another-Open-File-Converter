@@ -129,4 +129,13 @@ QCheckBox::indicator {
 #GithubLink:hover {
     color: #357abd;
 }
+
+QPushButton#UpdateButton {
+    background-color: #27ae60;
+    margin-bottom: 10px;
+}
+
+QPushButton#UpdateButton:hover {
+    background-color: #2ecc71;
+}
 """

@@ -5,38 +5,39 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
                              QProgressBar, QFileDialog, QDialog, QFormLayout, 
                              QLineEdit, QComboBox, QMessageBox, QTabWidget, 
-                             QCheckBox, QFrame)
-from PySide6.QtCore import Qt, QMimeData, Signal, QUrl
+                             QCheckBox, QFrame, QMenu)
+from PySide6.QtCore import Qt, QMimeData, Signal, QUrl, QThread
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
 
 from styles import MAIN_STYLE
 from settings_manager import SettingsManager
 from converter_worker import ConverterWorker
 from logger import app_logger
+from config import (VIDEO_FORMAT_CONFIG, VIDEO_FORMATS, IMAGE_FORMATS, 
+                    ALL_SUPPORTED_EXTENSIONS)
 
-# Mapping of container formats to supported video and audio codecs
-FORMAT_CONFIG = {
-    "webm": {
-        "video": ["libvpx-vp9", "libvpx"],
-        "audio": ["libopus", "libvorbis", "No Audio"]
-    },
-    "mp4": {
-        "video": ["libx264", "libx265", "copy"],
-        "audio": ["aac", "mp3", "copy", "No Audio"]
-    },
-    "mkv": {
-        "video": ["libx264", "libx265", "libvpx-vp9", "copy"],
-        "audio": ["aac", "mp3", "libopus", "copy", "No Audio"]
-    },
-    "avi": {
-        "video": ["libxvid", "mpeg4", "copy"],
-        "audio": ["mp3", "ac3", "copy", "No Audio"]
-    },
-    "mov": {
-        "video": ["libx264", "libx265", "copy"],
-        "audio": ["aac", "mp3", "copy", "No Audio"]
-    }
-}
+CLIENT_VERSION = "v1.1.0"
+
+class UpdateWorker(QThread):
+    """Worker to check for updates from GitHub API."""
+    update_available = Signal(str)
+
+    def run(self):
+        url = "https://api.github.com/repos/cenullum/Yet-Another-Open-File-Converter/releases/latest"
+        try:
+            import urllib.request
+            import json
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as response:
+                latest_data = json.loads(response.read())
+                latest_version = latest_data.get('name', latest_data.get('tag_name'))
+            
+            if latest_version and latest_version != CLIENT_VERSION:
+                self.update_available.emit(latest_version)
+        except Exception as e:
+            app_logger.error(f"Update check failed: {e}")
+
+# CLIENT_VERSION is defined above
 
 class SettingsDialog(QDialog):
     """Dialogue for adjusting image, video, and general settings."""
@@ -54,7 +55,7 @@ class SettingsDialog(QDialog):
         img_layout = QFormLayout(self.image_tab)
         
         self.target_img_format = QComboBox()
-        self.target_img_format.addItems(["webp", "jpg", "png", "bmp", "tiff"])
+        self.target_img_format.addItems(IMAGE_FORMATS)
         self.target_img_format.setCurrentText(self.settings_manager.get_setting("target_img_format", "webp"))
         self.target_img_format.currentTextChanged.connect(self.update_ui_state)
         img_layout.addRow("Format:", self.target_img_format)
@@ -87,7 +88,7 @@ class SettingsDialog(QDialog):
         vid_layout = QFormLayout(self.video_tab)
         
         self.target_vid_format = QComboBox()
-        self.target_vid_format.addItems(list(FORMAT_CONFIG.keys()))
+        self.target_vid_format.addItems(VIDEO_FORMATS)
         self.target_vid_format.setCurrentText(self.settings_manager.get_setting("target_vid_format", "webm"))
         self.target_vid_format.currentTextChanged.connect(self.update_ui_state)
         vid_layout.addRow("Format:", self.target_vid_format)
@@ -125,7 +126,7 @@ class SettingsDialog(QDialog):
         self.help_tab = QWidget()
         help_vbox = QVBoxLayout(self.help_tab)
         
-        help_info = QLabel("Yet Another Open File Converter\nSimple batch conversion tool.")
+        help_info = QLabel(f"Yet Another Open File Converter ({CLIENT_VERSION})\nSimple batch conversion tool.")
         help_info.setAlignment(Qt.AlignCenter)
         help_vbox.addWidget(help_info)
         
@@ -162,20 +163,26 @@ class SettingsDialog(QDialog):
         
         # Video/Audio codec filtering
         vid_fmt = self.target_vid_format.currentText()
-        if vid_fmt in FORMAT_CONFIG:
+        if vid_fmt in VIDEO_FORMAT_CONFIG:
+            config = VIDEO_FORMAT_CONFIG[vid_fmt]
+            
             # Update Video Codecs
             self.video_codec.clear()
-            self.video_codec.addItems(FORMAT_CONFIG[vid_fmt]["video"])
+            self.video_codec.addItems(config["video"])
             saved_v = self.settings_manager.get_setting("video_codec", "")
-            if saved_v in FORMAT_CONFIG[vid_fmt]["video"]:
+            if saved_v in config["video"]:
                 self.video_codec.setCurrentText(saved_v)
+            else:
+                self.video_codec.setCurrentText(config.get("default_video", config["video"][0]))
             
             # Update Audio Codecs
             self.audio_codec.clear()
-            self.audio_codec.addItems(FORMAT_CONFIG[vid_fmt]["audio"])
+            self.audio_codec.addItems(config["audio"])
             saved_a = self.settings_manager.get_setting("audio_codec", "")
-            if saved_a in FORMAT_CONFIG[vid_fmt]["audio"]:
+            if saved_a in config["audio"]:
                 self.audio_codec.setCurrentText(saved_a)
+            else:
+                self.audio_codec.setCurrentText(config.get("default_audio", config["audio"][0]))
 
     def open_link(self):
         QDesktopServices.openUrl(QUrl("https://github.com/cenullum/Yet-Another-Open-File-Converter"))
@@ -210,13 +217,15 @@ class SettingsDialog(QDialog):
 class DropArea(QLabel):
     """Area for file drop interactions. Emits list of files and optional folder name."""
     files_dropped = Signal(list, str) # files, folder_name
+    clicked = Signal()
 
     def __init__(self):
-        super().__init__("Drag and Drop Files Here")
+        super().__init__("Drag and Drop Files Here or Click Here")
         self.setObjectName("DropArea")
         self.setAlignment(Qt.AlignCenter)
         self.setAcceptDrops(True)
         self.setMinimumHeight(200)
+        self.setCursor(Qt.PointingHandCursor)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -249,8 +258,9 @@ class DropArea(QLabel):
                 collected.append(path)
                 
         self.files_dropped.emit(collected, folder_name)
-        self.setProperty("dragged", False)
-        self.update_style()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
 
     def update_style(self):
         self.style().unpolish(self)
@@ -276,9 +286,21 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 26px; font-weight: bold; margin-bottom: 5px;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
+        
+        version_label = QLabel(f"Version {CLIENT_VERSION}")
+        version_label.setStyleSheet("color: gray; font-size: 14px; margin-bottom: 10px;")
+        version_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(version_label)
+
+        self.btn_update = QPushButton("Update Available")
+        self.btn_update.setObjectName("UpdateButton")
+        self.btn_update.setVisible(False)
+        self.btn_update.clicked.connect(self.open_release_page)
+        layout.addWidget(self.btn_update)
 
         self.drop_area = DropArea()
         self.drop_area.files_dropped.connect(self.handle_files)
+        self.drop_area.clicked.connect(self.show_selection_menu)
         layout.addWidget(self.drop_area)
 
         self.file_list = QListWidget()
@@ -305,12 +327,23 @@ class MainWindow(QMainWindow):
         self.status = QLabel("Ready")
         layout.addWidget(self.status)
 
-    def handle_files(self, files, folder_name=""):
+        # Start update check
+        self.checker = UpdateWorker()
+        self.checker.update_available.connect(self.show_update_notification)
+        self.checker.start()
+
+    def handle_files(self, files, folder_name="", append=False):
         """Filter files by extension and store folder context if applicable."""
-        exts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.mp4', 
-                '.avi', '.mkv', '.mov', '.webm', '.flv', '.wmv', '.gif']
-        self.files_to_convert = [f for f in files if os.path.splitext(f)[1].lower() in exts]
-        self.source_folder_name = folder_name
+        new_files = [f for f in files if os.path.splitext(f)[1].lower() in ALL_SUPPORTED_EXTENSIONS]
+        
+        if append:
+            self.files_to_convert.extend(new_files)
+            # Remove duplicates while preserving order
+            seen = set()
+            self.files_to_convert = [x for x in self.files_to_convert if not (x in seen or seen.add(x))]
+        else:
+            self.files_to_convert = new_files
+            self.source_folder_name = folder_name
         
         self.file_list.clear()
         for f in self.files_to_convert:
@@ -319,8 +352,52 @@ class MainWindow(QMainWindow):
         if not self.files_to_convert:
             QMessageBox.warning(self, "Input Error", "No supported files found.")
         else:
-            context = f"from folder '{folder_name}'" if folder_name else ""
-            self.status.setText(f"Staged {len(self.files_to_convert)} files {context}.")
+            if append:
+                self.status.setText(f"Added {len(new_files)} files. Total staged: {len(self.files_to_convert)}.")
+            else:
+                context = f"from folder '{folder_name}'" if folder_name else ""
+                self.status.setText(f"Staged {len(self.files_to_convert)} files {context}.")
+
+    def show_selection_menu(self):
+        """Show context menu for choosing between files and folders."""
+        menu = QMenu(self)
+        
+        action_files = menu.addAction("Add Files...")
+        action_folder = menu.addAction("Add Folder...")
+        
+        # Position menu at mouse cursor or center of drop area
+        action = menu.exec(self.drop_area.mapToGlobal(self.drop_area.rect().center()))
+        
+        if action == action_files:
+            self.select_files()
+        elif action == action_folder:
+            self.select_folder()
+
+    def select_files(self):
+        ext_filter = "All Supported Files (" + " ".join([f"*{ext}" for ext in ALL_SUPPORTED_EXTENSIONS]) + ");;All Files (*)"
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Select Files", "", ext_filter
+        )
+        if files:
+            self.handle_files(files, append=True)
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+        if folder:
+            collected = []
+            for root, _, names in os.walk(folder):
+                for n in names:
+                    collected.append(os.path.join(root, n))
+            self.handle_files(collected, folder_name=os.path.basename(folder), append=True)
+
+    def show_update_notification(self, version):
+        """Show the update button with the latest version."""
+        self.btn_update.setText(f"Update Available ({version})")
+        self.btn_update.setVisible(True)
+
+    def open_release_page(self):
+        """Open the GitHub release page."""
+        QDesktopServices.openUrl(QUrl("https://github.com/cenullum/Yet-Another-Open-File-Converter/releases/latest"))
 
     def show_settings(self):
         SettingsDialog(self.settings_manager, self).exec()
