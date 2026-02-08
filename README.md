@@ -2,8 +2,8 @@
 
 A simple tool to convert many image and video files at once. I made this to handle basic file tasks with a simple interface.
 
-<img width="1146" height="851" alt="image" src="https://github.com/user-attachments/assets/77849e36-8e64-4679-aa04-a65fbf4114d1" />
 
+![Screenshot from 2026-02-09 01-21-52_converted](https://github.com/user-attachments/assets/f5208579-ff35-4157-b8fb-0cbfab997e07)
 
 
 ## What it does
@@ -32,6 +32,7 @@ A simple tool to convert many image and video files at once. I made this to hand
 - Progress bar and status updates.
 - Settings are saved automatically.
 - Log files are saved in the app data folder for troubleshooting.
+
 
 ## Technical Details
 
