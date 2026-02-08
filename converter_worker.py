@@ -5,26 +5,31 @@ import math
 import sys
 from PySide6.QtCore import QThread, Signal
 from logger import app_logger
-from config import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS
+from config import (SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS, 
+                    HARDWARE_ENCODER_MAPPINGS, SUPPORTED_AUDIO_INPUT_EXTENSIONS,
+                    AUDIO_FORMAT_CONFIG)
 
 class ConverterWorker(QThread):
     """
     Background worker thread for processing file conversions.
-    Handles both images (via ImageMagick) and videos/GIFs (via FFmpeg).
+    Handles images, videos/GIFs, and audio files (via FFmpeg).
     Supports real-time progress parsing for video and folder-aware output.
     """
     progress = Signal(int) # 0-1000 for granularity
     status = Signal(str)
     finished = Signal(bool, str)
+    hw_failed = Signal(str)
 
-    def __init__(self, files, target_img_format, target_vid_format, settings, source_folder_name=""):
+    def __init__(self, files, target_img_format, target_vid_format, target_snd_format, settings, source_folder_name=""):
         super().__init__()
         self.files = files
         self.target_img_format = target_img_format
         self.target_vid_format = target_vid_format
+        self.target_snd_format = target_snd_format
         self.settings = settings
         self.source_folder_name = source_folder_name
         self.is_cancelled = False
+        self.hw_encoder_cache = {}
         app_logger.info(f"ConverterWorker initialized. Files: {len(files)}, Folder: {source_folder_name}")
 
     def get_bin_path(self, bin_name):
@@ -39,6 +44,45 @@ class ConverterWorker(QThread):
                 return bundle_path
         
         return full_bin # Fallback to system PATH
+
+    def detect_hardware_encoder(self, base_codec):
+        """
+        Detects available hardware encoders and returns the best match.
+        Prioritizes NVIDIA (nvenc) > AMD (amf) > Intel (qsv) > VideoToolbox.
+        """
+        if base_codec in self.hw_encoder_cache:
+            return self.hw_encoder_cache[base_codec]
+
+        ffmpeg_bin = self.get_bin_path('ffmpeg')
+        try:
+            # Check for encoders
+            # Using -hide_banner to reduce output noise, though capture_output handles it.
+            result = subprocess.run([ffmpeg_bin, '-hide_banner', '-encoders'], capture_output=True, text=True)
+            output = result.stdout
+            
+            # Priority: NVENC > AMF > QSV > VideoToolbox
+            variants = []
+            if 'h264' in base_codec or 'x264' in base_codec:
+                variants = ['h264_nvenc', 'h264_amf', 'h264_qsv', 'h264_videotoolbox']
+            elif 'hevc' in base_codec or 'x265' in base_codec:
+                variants = ['hevc_nvenc', 'hevc_amf', 'hevc_qsv', 'hevc_videotoolbox']
+            elif 'vp9' in base_codec:
+                variants = ['vp9_qsv', 'vp9_amf'] # Nvidia typically decodes only
+            elif 'av1' in base_codec:
+                variants = ['av1_nvenc', 'av1_qsv', 'av1_amf']
+            
+            best_codec = base_codec
+            for var in variants:
+                # Regex looks for " V..... codec_name " pattern in ffmpeg -encoders output
+                if re.search(f" V..... {var} ", output):
+                    best_codec = var
+                    break
+            
+            self.hw_encoder_cache[base_codec] = best_codec
+            return best_codec
+        except Exception as e:
+            app_logger.warning(f"Failed to detect hardware encoders: {e}")
+            return base_codec
 
     def run(self):
         """
@@ -94,6 +138,11 @@ class ConverterWorker(QThread):
                     if output_base_dir:
                         out_path = os.path.join(output_base_dir, f"{os.path.basename(base_no_ext)}.{self.target_vid_format}")
                     success = self.process_video(file_path, out_path, i, total_files)
+                elif ext in SUPPORTED_AUDIO_INPUT_EXTENSIONS:
+                    out_path = f"{base_no_ext}_converted.{self.target_snd_format}"
+                    if output_base_dir:
+                        out_path = os.path.join(output_base_dir, f"{os.path.basename(base_no_ext)}.{self.target_snd_format}")
+                    success = self.process_audio(file_path, out_path)
                 else:
                     app_logger.warning(f"Skipping unsupported format: {ext}")
                     success = False
@@ -177,7 +226,6 @@ class ConverterWorker(QThread):
             except:
                 cmd.extend(['-c:v', 'libaom-av1', '-crf', '30'])
         
-
         elif fmt == 'ico':
             # ICO format - scale to 256x256 max and use ICO format
             if resize == '0' or not resize.isdigit() or int(resize) > 256:
@@ -216,6 +264,93 @@ class ConverterWorker(QThread):
         
         return result.returncode == 0
 
+    def process_audio(self, input_path, output_path):
+        """Convert audio using FFmpeg with format-specific encoding options."""
+        fmt = self.target_snd_format.lower()
+        quality = self.settings.get('audio_quality', 'Normal')
+        bitrate_mode = self.settings.get('audio_bitrate_mode', 'VBR')
+        compression = self.settings.get('audio_compression', 'Default')
+        sample_width = self.settings.get('audio_sample_width', '16 bits')
+        resample = self.settings.get('audio_resample', 'Original')
+        force_mono = self.settings.get('audio_force_mono', 'false') == 'true'
+        
+        ffmpeg_bin = self.get_bin_path('ffmpeg')
+        cmd = [ffmpeg_bin, '-y', '-i', input_path]
+        
+        # Quality level mapping (0=worst, 5=best for internal use)
+        quality_map = {
+            'Very Low': 0, 'Low': 1, 'Normal': 2, 
+            'High': 3, 'Very High': 4, 'Insanely High': 5
+        }
+        q_level = quality_map.get(quality, 2)
+        
+        # Resample if specified
+        if resample != 'Original' and resample.isdigit():
+            cmd.extend(['-ar', str(int(resample) * 1000)])  # kHz to Hz
+        
+        # Force mono output
+        if force_mono:
+            cmd.extend(['-ac', '1'])
+        
+        # Format-specific encoding options
+        if fmt == 'mp3':
+            cmd.extend(['-c:a', 'libmp3lame'])
+            if bitrate_mode == 'VBR':
+                # VBR quality: 0 (best) to 9 (worst), map from q_level
+                vbr_q = max(0, 9 - int(q_level * 1.8))
+                cmd.extend(['-q:a', str(vbr_q)])
+            else:
+                # CBR/ABR: Use fixed bitrates
+                bitrates = ['64k', '96k', '128k', '192k', '256k', '320k']
+                br = bitrates[min(q_level, 5)]
+                if bitrate_mode == 'ABR':
+                    cmd.extend(['-abr', '1'])
+                cmd.extend(['-b:a', br])
+        
+        elif fmt == 'ogg':
+            cmd.extend(['-c:a', 'libvorbis'])
+            # Vorbis quality: 0 to 10
+            vorbis_q = min(10, max(0, int(q_level * 2)))
+            cmd.extend(['-q:a', str(vorbis_q)])
+        
+        elif fmt == 'flac':
+            cmd.extend(['-c:a', 'flac'])
+            # FLAC compression level: 0 (least) to 12 (most)
+            comp_map = {'Less': '0', 'Default': '5', 'Better': '12'}
+            cmd.extend(['-compression_level', comp_map.get(compression, '5')])
+        
+        elif fmt == 'wav':
+            # Sample width mapping
+            width_map = {
+                '8 bits': 'pcm_u8',
+                '16 bits': 'pcm_s16le',
+                '32 bits': 'pcm_s32le'
+            }
+            codec = width_map.get(sample_width, 'pcm_s16le')
+            cmd.extend(['-c:a', codec])
+        
+        elif fmt == 'm4a':
+            cmd.extend(['-c:a', 'aac'])
+            # AAC quality: VBR 1-5 (higher = better)
+            aac_q = ['1', '2', '2', '3', '4', '5'][min(q_level, 5)]
+            cmd.extend(['-q:a', aac_q])
+        
+        elif fmt == 'opus':
+            cmd.extend(['-c:a', 'libopus'])
+            # Opus bitrate mapping
+            opus_bitrates = ['32k', '64k', '96k', '128k', '192k', '256k']
+            cmd.extend(['-b:a', opus_bitrates[min(q_level, 5)]])
+        
+        cmd.append(output_path)
+        
+        app_logger.info(f"Audio conversion command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            app_logger.error(f"FFmpeg audio error: {result.stderr}")
+        
+        return result.returncode == 0
+
     def get_video_duration(self, path):
         """Get video duration in seconds using ffprobe."""
         try:
@@ -234,58 +369,106 @@ class ConverterWorker(QThread):
         res = self.settings.get('video_resolution', 'Original')
         fps = self.settings.get('video_fps', '30')
         preserve_md = self.settings.get('video_metadata', 'true') == 'true'
+        use_hw_accel = self.settings.get('video_hw_accel', 'true') == 'true'
         
+        # In dynamic mode, 'v_codec' is already the best choice (HW or SW) selected by the user/UI.
+        # But we still check if it looks like a HW codec for fallback logic purposes.
+        used_hw = 'nvenc' in v_codec or 'amf' in v_codec or 'qsv' in v_codec or 'videotoolbox' in v_codec
+        
+        # If user forcefully disabled HW accel but somehow a HW codec was passed (e.g. from old settings),
+        # we might want to revert to SW. But usually UI handles this. 
+        # For safety/consistency with the toggle:
+        if not use_hw_accel and used_hw:
+             # Try to map back to SW if possible, or just warn.
+             # Simple heuristic: replace known hw suffixes
+             sw_map = {
+                 'h264_nvenc': 'libx264', 'h264_amf': 'libx264', 'h264_qsv': 'libx264',
+                 'hevc_nvenc': 'libx265', 'hevc_amf': 'libx265', 'hevc_qsv': 'libx265',
+                 'vp9_qsv': 'libvpx-vp9', 'av1_nvenc': 'libaom-av1', 'av1_qsv': 'libaom-av1'
+             }
+             if v_codec in sw_map:
+                 app_logger.info(f"HW Accel disabled: Reverting {v_codec} to {sw_map[v_codec]}")
+                 v_codec = sw_map[v_codec]
+                 used_hw = False
+
         duration = self.get_video_duration(input_path)
         
-        ffmpeg_bin = self.get_bin_path('ffmpeg')
-        cmd = [ffmpeg_bin, '-i', input_path, '-progress', 'pipe:1', '-nostats']
-        
-        if preserve_md: cmd.extend(['-map_metadata', '0'])
-        else: cmd.extend(['-map_metadata', '-1'])
+        # Helper to build and run command
+        def run_ffmpeg(codec, is_hw):
+            ffmpeg_bin = self.get_bin_path('ffmpeg')
+            cmd = [ffmpeg_bin, '-i', input_path, '-progress', 'pipe:1', '-nostats']
             
-        # Audio handling
-        if a_codec == "No Audio":
-            cmd.append('-an')
-        else:
-            cmd.extend(['-c:a', a_codec])
+            if preserve_md: cmd.extend(['-map_metadata', '0'])
+            else: cmd.extend(['-map_metadata', '-1'])
+                
+            # Audio handling
+            if a_codec == "No Audio":
+                cmd.append('-an')
+            else:
+                cmd.extend(['-c:a', a_codec])
 
-        # Filters
-        vf = []
-        if res != 'Original':
-            h = res.split('(')[-1].replace('p)', '') if '(' in res else res.replace('p', '')
-            if h.isdigit(): vf.append(f"scale=-2:{h}")
-        if vf: cmd.extend(['-vf', ','.join(vf)])
+            # Filters & Pixel Format
+            vf = []
+            if is_hw and ('nvenc' in codec or 'amf' in codec or 'qsv' in codec) and ('h264' in codec or 'hevc' in codec):
+                # Enforce yuv420p for better compatibility with HW encoders
+                cmd.extend(['-pix_fmt', 'yuv420p'])
             
-        if fps != '0' and fps.isdigit(): cmd.extend(['-r', fps])
+            if res != 'Original':
+                h = res.split('(')[-1].replace('p)', '') if '(' in res else res.replace('p', '')
+                if h.isdigit(): vf.append(f"scale=-2:{h}")
+            if vf: cmd.extend(['-vf', ','.join(vf)])
+                
+            if fps != '0' and fps.isdigit(): cmd.extend(['-r', fps])
+                
+            cmd.extend(['-c:v', codec, '-b:v', bitrate, '-y', output_path])
             
-        cmd.extend(['-c:v', v_codec, '-b:v', bitrate, '-y', output_path])
-        
-        app_logger.info(f"FFmpeg command: {' '.join(cmd)}")
-        
-        # Start FFmpeg and parse output
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-        
-        while True:
-            line = process.stdout.readline()
-            if not line:
-                break
+            app_logger.info(f"FFmpeg command (HW={is_hw}): {' '.join(cmd)}")
             
-            # Parse progress: out_time_ms=...
-            if 'out_time_ms=' in line and duration > 0:
-                try:
-                    ms = int(line.split('=')[1].strip())
-                    secs = ms / 1000000.0
-                    progress_pct = (secs / duration) * 100
-                    # Scale based on current file index
-                    base_progress = (file_index / total_files) * 1000
-                    file_slice = (1.0 / total_files) * 1000
-                    current_total_progress = base_progress + (progress_pct / 100.0) * file_slice
-                    self.progress.emit(int(current_total_progress))
-                except:
-                    pass
+            # Start FFmpeg and parse output
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+            
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                
+                # Parse progress: out_time_ms=...
+                if 'out_time_ms=' in line and duration > 0:
+                    try:
+                        ms = int(line.split('=')[1].strip())
+                        secs = ms / 1000000.0
+                        progress_pct = (secs / duration) * 100
+                        # Scale based on current file index
+                        base_progress = (file_index / total_files) * 1000
+                        file_slice = (1.0 / total_files) * 1000
+                        current_total_progress = base_progress + (progress_pct / 100.0) * file_slice
+                        self.progress.emit(int(current_total_progress))
+                    except:
+                        pass
 
-        process.wait()
-        return process.returncode == 0
+            process.wait()
+            return process.returncode == 0
+
+        # Attempt 1: Originally selected codec as specified by UI
+        success = run_ffmpeg(v_codec, used_hw)
+        
+        # Attempt 2: Fallback to software if HW failed
+        if not success and used_hw:
+            # Find the software base for this hardware codec
+            sw_fallback = v_codec
+            for base, variants in HARDWARE_ENCODER_MAPPINGS.items():
+                if v_codec in variants:
+                    sw_fallback = base
+                    break
+            
+            if sw_fallback != v_codec:
+                fail_msg = f"Hardware Encoding ({v_codec}) Failed! Switched to Software ({sw_fallback})."
+                app_logger.warning(fail_msg)
+                self.hw_failed.emit(fail_msg)
+                
+                success = run_ffmpeg(sw_fallback, False)
+            
+        return success
 
     def format_summary(self, success_count, failed_files, orig_bytes, conv_bytes):
         """Build a human-readable summary of the conversion results."""

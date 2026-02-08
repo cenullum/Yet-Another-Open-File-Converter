@@ -9,17 +9,23 @@ A simple tool to convert many image and video files at once. I made this to hand
 ## What it does
 
 ### Images
-- Changes formats (WebP, JPG, PNG, etc.).
+- Changes formats: `webp`, `jpg`, `jpeg`, `png`, `bmp`, `tiff`, `tif`, `ico`, `avif`, `tga`, `ppm`, `pgm`, `pbm`, `pnm`, `gif`, `exr`, `hdr`.
 - Can resize images.
 - Can turn images into black and white.
 - Option to keep or remove metadata.
 
 ### Videos
-- Changes formats (WebM, MP4, MKV, etc.).
+- Changes formats: `mp4`, `mkv`, `webm`, `avi`, `mov`, `flv`, `wmv`, `gif`, `ogv`, `3gp`, `m4v`, `mpg`, `mpeg`, `ts`, `m2ts`.
 - Supports different codecs (automatically filtered by format).
+- **Hardware Acceleration support** (NVENC, AMF, QSV, etc. - *Experimental*).
 - Can change bitrate, resolution (up to 4K), and FPS.
 - Treats GIFs as videos for better compression.
 - Shows how much file space you saved after converting.
+
+### Sound
+- Changes formats: `mp3`, `ogg`, `flac`, `wav`, `m4a`, `opus`.
+- Supports quality levels, bitrate modes, compression, and sample widths.
+- Resampling and mono output options.
 
 ### Interface
 - Drag and drop files or folders.

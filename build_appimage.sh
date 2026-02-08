@@ -57,6 +57,8 @@ $PYINSTALLER_CMD --noconsole --onefile --clean \
     --add-data "$ROOT_DIR/settings_manager.py:." \
     --add-data "$ROOT_DIR/converter_worker.py:." \
     --add-data "$ROOT_DIR/logger.py:." \
+    --add-data "$ROOT_DIR/config.py:." \
+    --add-data "$ROOT_DIR/codec_manager.py:." \
     main.py
 
 # 4. Download linuxdeploy into build_files

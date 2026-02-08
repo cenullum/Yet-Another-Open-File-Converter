@@ -11,6 +11,79 @@ IMAGE_FORMATS = [
     "pbm", "pnm", "gif", "exr", "hdr"
 ]
 
+# --- Audio Format Configurations ---
+AUDIO_FORMATS = ["mp3", "ogg", "flac", "wav", "m4a", "opus"]
+
+# Maps audio formats to their available settings
+# has_quality, has_bitrate_mode, has_compression, has_sample_width
+AUDIO_FORMAT_CONFIG = {
+    "mp3": {
+        "encoder": "libmp3lame",
+        "has_quality": True,
+        "has_bitrate_mode": True,
+        "has_compression": False,
+        "has_sample_width": False
+    },
+    "ogg": {
+        "encoder": "libvorbis",
+        "has_quality": True,
+        "has_bitrate_mode": False,
+        "has_compression": False,
+        "has_sample_width": False
+    },
+    "flac": {
+        "encoder": "flac",
+        "has_quality": False,
+        "has_bitrate_mode": False,
+        "has_compression": True,
+        "has_sample_width": False
+    },
+    "wav": {
+        "encoder": "pcm_s16le",
+        "has_quality": False,
+        "has_bitrate_mode": False,
+        "has_compression": False,
+        "has_sample_width": True
+    },
+    "m4a": {
+        "encoder": "aac",
+        "has_quality": True,
+        "has_bitrate_mode": False,
+        "has_compression": False,
+        "has_sample_width": False
+    },
+    "opus": {
+        "encoder": "libopus",
+        "has_quality": True,
+        "has_bitrate_mode": False,
+        "has_compression": False,
+        "has_sample_width": False
+    }
+}
+
+# Quality levels for audio encoding (maps to encoder-specific values)
+AUDIO_QUALITY_LEVELS = [
+    "Very Low", "Low", "Normal", "High", "Very High", "Insanely High"
+]
+
+# Bitrate modes for MP3
+AUDIO_BITRATE_MODES = ["CBR", "ABR", "VBR"]
+
+# Compression levels for FLAC
+AUDIO_COMPRESSION_LEVELS = ["Less", "Default", "Better"]
+
+# Sample width options for WAV
+AUDIO_SAMPLE_WIDTHS = ["8 bits", "16 bits", "32 bits"]
+
+# Resample rate options in kHz
+AUDIO_RESAMPLE_RATES = ["Original", "8", "11", "16", "22", "32", "44", "48", "96", "128"]
+
+# Supported audio input extensions
+SUPPORTED_AUDIO_INPUT_EXTENSIONS = {
+    ".mp3", ".ogg", ".flac", ".wav", ".m4a", ".opus", 
+    ".wma", ".aac", ".aiff", ".aif", ".ape", ".wv"
+}
+
 # --- Video Format Configurations ---
 # Maps container formats to their compatible video and audio codecs
 VIDEO_FORMAT_CONFIG = {
@@ -108,8 +181,18 @@ VIDEO_FORMAT_CONFIG = {
 
 VIDEO_FORMATS = list(VIDEO_FORMAT_CONFIG.keys())
 
-# --- Derived Extension Sets ---
-# Generate extension sets from the format lists above
 SUPPORTED_IMAGE_EXTENSIONS = {f".{fmt}" for fmt in IMAGE_FORMATS}
 SUPPORTED_VIDEO_EXTENSIONS = {f".{fmt}" for fmt in VIDEO_FORMATS}
-ALL_SUPPORTED_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS
+ALL_SUPPORTED_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_VIDEO_EXTENSIONS | SUPPORTED_AUDIO_INPUT_EXTENSIONS
+
+# --- Hardware Encoder Mappings ---
+# Maps base software codecs to their potential hardware-accelerated variants.
+# Priority is often determined by the order in which they are checked or system availability.
+HARDWARE_ENCODER_MAPPINGS = {
+    "libx264": ["h264_nvenc", "h264_amf", "h264_qsv", "h264_videotoolbox", "h264_vaapi"],
+    "libx265": ["hevc_nvenc", "hevc_amf", "hevc_qsv", "hevc_videotoolbox", "hevc_vaapi"],
+    "libvpx-vp9": ["vp9_qsv", "vp9_vaapi", "vp9_amf"], 
+    "libaom-av1": ["av1_nvenc", "av1_qsv", "av1_amf", "av1_vaapi"],
+    "mpeg2video": ["mpeg2_qsv", "mpeg2_vaapi"],
+    "mjpeg": ["mjpeg_qsv", "mjpeg_vaapi"]
+}

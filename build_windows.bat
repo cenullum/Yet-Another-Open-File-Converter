@@ -81,6 +81,8 @@ set ADD_DATA=--add-data "%BASE_DIR%styles.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%settings_manager.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%converter_worker.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%logger.py;."
+set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%config.py;."
+set ADD_DATA=%ADD_DATA% --add-data "%BASE_DIR%codec_manager.py;."
 set ADD_DATA=%ADD_DATA% --add-data "%FFMPEG_EXE%;."
 set ADD_DATA=%ADD_DATA% --add-data "%FFPROBE_EXE%;."
 

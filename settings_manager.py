@@ -20,7 +20,8 @@ class SettingsManager:
             "target_vid_format": "webm",
             "video_fps": "30",
             "image_metadata": "true",
-            "video_metadata": "true"
+            "video_metadata": "true",
+            "video_hw_accel": "true"
         }
         
         val = self.settings.value(key)

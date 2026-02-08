@@ -11,10 +11,13 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
 
 from styles import MAIN_STYLE
 from settings_manager import SettingsManager
+from codec_manager import CodecManager
 from converter_worker import ConverterWorker
 from logger import app_logger
 from config import (VIDEO_FORMAT_CONFIG, VIDEO_FORMATS, IMAGE_FORMATS, 
-                    ALL_SUPPORTED_EXTENSIONS)
+                    ALL_SUPPORTED_EXTENSIONS, AUDIO_FORMATS, AUDIO_FORMAT_CONFIG,
+                    AUDIO_QUALITY_LEVELS, AUDIO_BITRATE_MODES, AUDIO_COMPRESSION_LEVELS,
+                    AUDIO_SAMPLE_WIDTHS, AUDIO_RESAMPLE_RATES)
 
 CLIENT_VERSION = "v1.1.0"
 
@@ -41,11 +44,12 @@ class UpdateWorker(QThread):
 
 class SettingsDialog(QDialog):
     """Dialogue for adjusting image, video, and general settings."""
-    def __init__(self, settings_manager, parent=None):
+    def __init__(self, settings_manager, codec_manager, parent=None):
         super().__init__(parent)
         self.settings_manager = settings_manager
+        self.codec_manager = codec_manager
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(550)
         
         main_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
@@ -116,11 +120,67 @@ class SettingsDialog(QDialog):
         self.video_metadata.setChecked(self.settings_manager.get_setting("video_metadata", "true") == "true")
         vid_layout.addRow("", self.video_metadata)
 
+        self.video_hw_accel = QCheckBox("Use Hardware Acceleration(May not work properly)")
+        self.video_hw_accel.setChecked(self.settings_manager.get_setting("video_hw_accel", "true") == "true")
+        self.video_hw_accel.stateChanged.connect(self.update_ui_state)
+        vid_layout.addRow("", self.video_hw_accel)
+
         hint_vid = QLabel("Tip: 0 FPS means original rate.")
         hint_vid.setStyleSheet("color: gray; font-size: 10px;")
         vid_layout.addRow("", hint_vid)
         
         self.tabs.addTab(self.video_tab, "Video")
+
+        # --- Sound Tab ---
+        self.sound_tab = QWidget()
+        snd_layout = QFormLayout(self.sound_tab)
+        
+        self.target_snd_format = QComboBox()
+        self.target_snd_format.addItems(AUDIO_FORMATS)
+        self.target_snd_format.setCurrentText(self.settings_manager.get_setting("target_snd_format", "mp3"))
+        self.target_snd_format.currentTextChanged.connect(self.update_ui_state)
+        snd_layout.addRow("Format:", self.target_snd_format)
+        
+        # Bitrate Mode (MP3 only)
+        self.snd_bitrate_mode_label = QLabel("Bitrate Mode:")
+        self.snd_bitrate_mode = QComboBox()
+        self.snd_bitrate_mode.addItems(AUDIO_BITRATE_MODES)
+        self.snd_bitrate_mode.setCurrentText(self.settings_manager.get_setting("audio_bitrate_mode", "VBR"))
+        snd_layout.addRow(self.snd_bitrate_mode_label, self.snd_bitrate_mode)
+        
+        # Quality (MP3, OGG, M4A, OPUS)
+        self.snd_quality_label = QLabel("Quality:")
+        self.snd_quality = QComboBox()
+        self.snd_quality.addItems(AUDIO_QUALITY_LEVELS)
+        self.snd_quality.setCurrentText(self.settings_manager.get_setting("audio_quality", "Normal"))
+        snd_layout.addRow(self.snd_quality_label, self.snd_quality)
+        
+        # Compression (FLAC only)
+        self.snd_compression_label = QLabel("Compression:")
+        self.snd_compression = QComboBox()
+        self.snd_compression.addItems(AUDIO_COMPRESSION_LEVELS)
+        self.snd_compression.setCurrentText(self.settings_manager.get_setting("audio_compression", "Default"))
+        snd_layout.addRow(self.snd_compression_label, self.snd_compression)
+        
+        # Sample Width (WAV only)
+        self.snd_sample_width_label = QLabel("Sample Width:")
+        self.snd_sample_width = QComboBox()
+        self.snd_sample_width.addItems(AUDIO_SAMPLE_WIDTHS)
+        self.snd_sample_width.setCurrentText(self.settings_manager.get_setting("audio_sample_width", "16 bits"))
+        snd_layout.addRow(self.snd_sample_width_label, self.snd_sample_width)
+        
+        # Resample (all formats)
+        self.snd_resample = QComboBox()
+        self.snd_resample.addItems(AUDIO_RESAMPLE_RATES)
+        self.snd_resample.setCurrentText(self.settings_manager.get_setting("audio_resample", "Original"))
+        snd_layout.addRow("Resample (kHz):", self.snd_resample)
+        
+        # Force Mono (all formats)
+        self.snd_force_mono = QCheckBox("Force Mono Output")
+        self.snd_force_mono.setChecked(self.settings_manager.get_setting("audio_force_mono", "false") == "true")
+        snd_layout.addRow("", self.snd_force_mono)
+        
+        self.tabs.addTab(self.sound_tab, "Sound")
 
         # --- Help Tab ---
         self.help_tab = QWidget()
@@ -166,14 +226,37 @@ class SettingsDialog(QDialog):
         if vid_fmt in VIDEO_FORMAT_CONFIG:
             config = VIDEO_FORMAT_CONFIG[vid_fmt]
             
-            # Update Video Codecs
+            # --- Dynamic Codec Filtering ---
+            # Get base codecs from config
+            base_codecs = config["video"]
+            
+            # Use CodecManager to filter/map these based on HW setting + Availability
+            use_hw = self.video_hw_accel.isChecked()
+            compatible_codecs = self.codec_manager.get_compatible_codecs(base_codecs, use_hw)
+            
+            # If no codecs found (rare), fallback to config just to show something
+            if not compatible_codecs:
+                compatible_codecs = base_codecs
+
+            # Update Video Codecs Dropdown
+            # Remember selection if valid
+            current_selection = self.video_codec.currentText()
+            self.video_codec.blockSignals(True)
             self.video_codec.clear()
-            self.video_codec.addItems(config["video"])
-            saved_v = self.settings_manager.get_setting("video_codec", "")
-            if saved_v in config["video"]:
-                self.video_codec.setCurrentText(saved_v)
+            self.video_codec.addItems(compatible_codecs)
+            
+            # Try to restore previous selection if it exists in new list
+            # Or try to match a HW variant of the previous selection
+            if current_selection in compatible_codecs:
+                self.video_codec.setCurrentText(current_selection)
             else:
-                self.video_codec.setCurrentText(config.get("default_video", config["video"][0]))
+                # If current selection was 'libx264' and new list has 'h264_nvenc', switch to it?
+                # Actually, get_compatible_codecs already did the mapping. 
+                # So we just select the first available one as default.
+                if compatible_codecs:
+                    self.video_codec.setCurrentIndex(0)
+
+            self.video_codec.blockSignals(False)
             
             # Update Audio Codecs
             self.audio_codec.clear()
@@ -183,6 +266,27 @@ class SettingsDialog(QDialog):
                 self.audio_codec.setCurrentText(saved_a)
             else:
                 self.audio_codec.setCurrentText(config.get("default_audio", config["audio"][0]))
+
+        # --- Sound format-specific visibility ---
+        snd_fmt = self.target_snd_format.currentText()
+        if snd_fmt in AUDIO_FORMAT_CONFIG:
+            cfg = AUDIO_FORMAT_CONFIG[snd_fmt]
+            
+            # Bitrate Mode (MP3 only)
+            self.snd_bitrate_mode_label.setVisible(cfg["has_bitrate_mode"])
+            self.snd_bitrate_mode.setVisible(cfg["has_bitrate_mode"])
+            
+            # Quality (MP3, OGG, M4A, OPUS)
+            self.snd_quality_label.setVisible(cfg["has_quality"])
+            self.snd_quality.setVisible(cfg["has_quality"])
+            
+            # Compression (FLAC only)
+            self.snd_compression_label.setVisible(cfg["has_compression"])
+            self.snd_compression.setVisible(cfg["has_compression"])
+            
+            # Sample Width (WAV only)
+            self.snd_sample_width_label.setVisible(cfg["has_sample_width"])
+            self.snd_sample_width.setVisible(cfg["has_sample_width"])
 
     def open_link(self):
         QDesktopServices.openUrl(QUrl("https://github.com/cenullum/Yet-Another-Open-File-Converter"))
@@ -209,7 +313,16 @@ class SettingsDialog(QDialog):
             "video_bitrate": self.video_bitrate.text(),
             "video_resolution": self.video_res.currentText(),
             "video_fps": self.video_fps.text(),
-            "video_metadata": "true" if self.video_metadata.isChecked() else "false"
+            "video_metadata": "true" if self.video_metadata.isChecked() else "false",
+            "video_hw_accel": "true" if self.video_hw_accel.isChecked() else "false",
+            # Sound settings
+            "target_snd_format": self.target_snd_format.currentText(),
+            "audio_bitrate_mode": self.snd_bitrate_mode.currentText(),
+            "audio_quality": self.snd_quality.currentText(),
+            "audio_compression": self.snd_compression.currentText(),
+            "audio_sample_width": self.snd_sample_width.currentText(),
+            "audio_resample": self.snd_resample.currentText(),
+            "audio_force_mono": "true" if self.snd_force_mono.isChecked() else "false"
         }
         self.settings_manager.save_all_settings(settings)
         self.accept()
@@ -275,6 +388,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(MAIN_STYLE)
         
         self.settings_manager = SettingsManager()
+        self.codec_manager = CodecManager()
+        
         self.files_to_convert = []
         self.source_folder_name = ""
 
@@ -327,6 +442,11 @@ class MainWindow(QMainWindow):
         self.status = QLabel("Ready")
         layout.addWidget(self.status)
 
+        self.error_label = QLabel("")
+        self.error_label.setStyleSheet("color: #ff5555; font-size: 12px; margin-top: 5px;")
+        self.error_label.setVisible(False)
+        layout.addWidget(self.error_label)
+
         # Start update check
         self.checker = UpdateWorker()
         self.checker.update_available.connect(self.show_update_notification)
@@ -334,6 +454,7 @@ class MainWindow(QMainWindow):
 
     def handle_files(self, files, folder_name="", append=False):
         """Filter files by extension and store folder context if applicable."""
+        self.error_label.setVisible(False) # Clear error on new files
         new_files = [f for f in files if os.path.splitext(f)[1].lower() in ALL_SUPPORTED_EXTENSIONS]
         
         if append:
@@ -400,7 +521,8 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl("https://github.com/cenullum/Yet-Another-Open-File-Converter/releases/latest"))
 
     def show_settings(self):
-        SettingsDialog(self.settings_manager, self).exec()
+        # Pass codec manager to settings dialog so it can filter codecs dynamically
+        SettingsDialog(self.settings_manager, self.codec_manager, self).exec()
 
     def start_process(self):
         if not self.files_to_convert:
@@ -414,12 +536,18 @@ class MainWindow(QMainWindow):
         settings = self.settings_manager.load_all_settings()
         img_fmt = self.settings_manager.get_setting("target_img_format", "webp")
         vid_fmt = self.settings_manager.get_setting("target_vid_format", "webm")
+        snd_fmt = self.settings_manager.get_setting("target_snd_format", "mp3")
         
-        self.worker = ConverterWorker(self.files_to_convert, img_fmt, vid_fmt, settings, self.source_folder_name)
+        self.worker = ConverterWorker(self.files_to_convert, img_fmt, vid_fmt, snd_fmt, settings, self.source_folder_name)
         self.worker.progress.connect(self.update_progress)
         self.worker.status.connect(self.status.setText)
+        self.worker.hw_failed.connect(self.show_error)
         self.worker.finished.connect(self.finish_ui)
         self.worker.start()
+
+    def show_error(self, msg):
+        self.error_label.setText(msg)
+        self.error_label.setVisible(True)
 
     def update_progress(self, val):
         """Update progress bar with high-granularity value (0-1000)."""
