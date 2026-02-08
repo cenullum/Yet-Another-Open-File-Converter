@@ -4,8 +4,7 @@
 set -e
 
 # Configuration
-APP_NAME="Yet Another Open File Converter"
-BINARY_NAME="Yet-Another-Open-File-Converter" # No spaces for the binary
+APP_NAME="YetAnotherOpenFileConverter"
 BUILD_DIR="build_files"
 DESKTOP_PATH="$HOME/Desktop"
 
@@ -49,7 +48,7 @@ PYINSTALLER_CMD="python3 -m PyInstaller"
 [ "$USE_VENV" = true ] && PYINSTALLER_CMD="pyinstaller"
 
 $PYINSTALLER_CMD --noconsole --onefile --clean \
-    --name "$BINARY_NAME" \
+    --name "$APP_NAME" \
     --workpath "$BUILD_DIR/work" \
     --specpath "$BUILD_DIR" \
     --distpath "$BUILD_DIR/dist" \
@@ -74,16 +73,16 @@ echo "Structuring AppDir..."
 APPDIR="$BUILD_DIR/AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
-cp "$BUILD_DIR/dist/$BINARY_NAME" "$APPDIR/usr/bin/"
+cp "$BUILD_DIR/dist/$APP_NAME" "$APP_DIR/usr/bin/"
 
 # 6. Generate Desktop file and handle Icon
 # Desktop file goes into build_files
-DESKTOP_FILE="$BUILD_DIR/$BINARY_NAME.desktop"
+DESKTOP_FILE="$BUILD_DIR/$APP_NAME.desktop"
 cat <<EOF > "$DESKTOP_FILE"
 [Desktop Entry]
 Type=Application
 Name=$APP_NAME
-Exec=$BINARY_NAME
+Exec=$APP_NAME
 Icon=icon
 Categories=Utility;
 EOF
@@ -106,7 +105,7 @@ echo "Generating AppImage..."
 FINAL_APPIMAGE=$(ls *.AppImage | grep -v "linuxdeploy" | head -n 1)
 
 if [ -n "$FINAL_APPIMAGE" ] && [ -d "$DESKTOP_PATH" ]; then
-    TARGET_NAME="${APP_NAME// /-}.AppImage"
+    TARGET_NAME="${APP_NAME}.AppImage"
     echo "Moving executable to Desktop as $TARGET_NAME..."
     mv "$FINAL_APPIMAGE" "$DESKTOP_PATH/$TARGET_NAME"
     echo "Success! Find your AppImage here: $DESKTOP_PATH/$TARGET_NAME"

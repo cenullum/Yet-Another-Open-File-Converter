@@ -5,7 +5,7 @@ setlocal enabledelayedexpansion
 set "BASE_DIR=%~dp0"
 
 :: Configuration
-set "APP_NAME=YetAnotherOpen.FileConverter"
+set "APP_NAME=YetAnotherOpenFileConverter"
 set "BUILD_DIR=%BASE_DIR%build_files_windows"
 set "FFMPEG_URL=https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 set "DESKTOP_DIR=%USERPROFILE%\Desktop"
