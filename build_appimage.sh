@@ -73,7 +73,7 @@ echo "Structuring AppDir..."
 APPDIR="$BUILD_DIR/AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
-cp "$BUILD_DIR/dist/$APP_NAME" "$APP_DIR/usr/bin/"
+cp "$BUILD_DIR/dist/$APP_NAME" "$APPDIR/usr/bin/"
 
 # 6. Generate Desktop file and handle Icon
 # Desktop file goes into build_files

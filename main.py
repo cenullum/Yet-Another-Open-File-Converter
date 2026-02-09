@@ -580,6 +580,10 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app_logger.info("Initializing application.")
     app = QApplication(sys.argv)
+    
+    app.setStyle("Fusion")
+
+    
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
