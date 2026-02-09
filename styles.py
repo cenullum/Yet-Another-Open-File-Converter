@@ -104,11 +104,11 @@ QTabBar::tab:selected {
 }
 
 QLineEdit, QComboBox {
-    background-color: #333333;
+    background-color: #222222;
     border: 1px solid #444444;
     border-radius: 4px;
     padding: 5px;
-    color: white;
+    color: #808080;
 }
 
 QCheckBox {
