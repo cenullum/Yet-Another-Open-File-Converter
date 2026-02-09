@@ -19,7 +19,7 @@ from config import (VIDEO_FORMAT_CONFIG, VIDEO_FORMATS, IMAGE_FORMATS,
                     AUDIO_QUALITY_LEVELS, AUDIO_BITRATE_MODES, AUDIO_COMPRESSION_LEVELS,
                     AUDIO_SAMPLE_WIDTHS, AUDIO_RESAMPLE_RATES)
 
-CLIENT_VERSION = "v1.1.0"
+CLIENT_VERSION = "v1.1.1"
 
 class UpdateWorker(QThread):
     """Worker to check for updates from GitHub API."""
