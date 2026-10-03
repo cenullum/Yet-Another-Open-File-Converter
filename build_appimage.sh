@@ -5,7 +5,7 @@ set -e
 
 # Configuration
 APP_NAME="YetAnotherOpenFileConverter"
-BUILD_DIR="build_files"
+BUILD_DIR="${BUILD_DIR:-build_files}"
 DESKTOP_PATH="$HOME/Desktop"
 
 echo "Starting build process for: $APP_NAME"
@@ -35,9 +35,9 @@ fi
 echo "Installing build dependencies..."
 if [ "$USE_VENV" = true ]; then
     pip install --upgrade pip
-    pip install PyInstaller PySide6
+    pip install PyInstaller PySide6 certifi
 else
-    pip3 install PyInstaller PySide6 --break-system-packages
+    pip3 install PyInstaller PySide6 certifi --break-system-packages
 fi
 
 # 3. Build with PyInstaller

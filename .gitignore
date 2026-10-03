@@ -160,4 +160,5 @@ build/
 *.AppImage
 /build_venv
 build_files_windows/
+build_files_docker/
 Yet Another Open File Converter.exe

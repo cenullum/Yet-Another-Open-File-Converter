@@ -1,6 +1,15 @@
 import sys
 import os
 import subprocess
+
+# PyInstaller points LD_LIBRARY_PATH at its bundled libs; restore the original
+# so child processes (ffmpeg, ImageMagick, xdg-open) use the system libraries.
+if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
+    if 'LD_LIBRARY_PATH_ORIG' in os.environ:
+        os.environ['LD_LIBRARY_PATH'] = os.environ['LD_LIBRARY_PATH_ORIG']
+    else:
+        os.environ.pop('LD_LIBRARY_PATH', None)
+
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
                              QProgressBar, QFileDialog, QDialog, QFormLayout, 
@@ -19,7 +28,7 @@ from config import (VIDEO_FORMAT_CONFIG, VIDEO_FORMATS, IMAGE_FORMATS,
                     AUDIO_QUALITY_LEVELS, AUDIO_BITRATE_MODES, AUDIO_COMPRESSION_LEVELS,
                     AUDIO_SAMPLE_WIDTHS, AUDIO_RESAMPLE_RATES)
 
-CLIENT_VERSION = "v1.1.1"
+CLIENT_VERSION = "v1.2.0"
 
 class UpdateWorker(QThread):
     """Worker to check for updates from GitHub API."""
@@ -30,8 +39,16 @@ class UpdateWorker(QThread):
         try:
             import urllib.request
             import json
+            import ssl
+            # Bundled CA file: a frozen build's OpenSSL looks for certs at the
+            # build distro's paths, which may not exist on the user's system.
+            try:
+                import certifi
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                ssl_context = ssl.create_default_context()
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, context=ssl_context) as response:
                 latest_data = json.loads(response.read())
                 latest_version = latest_data.get('name', latest_data.get('tag_name'))
             
@@ -580,7 +597,13 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app_logger.info("Initializing application.")
     app = QApplication(sys.argv)
-    
+
+    # Qt has loaded its plugins by now. Drop the bundled Qt paths so system Qt
+    # programs launched from here (kde-open via xdg-open) don't load them and crash.
+    if getattr(sys, 'frozen', False) and sys.platform.startswith('linux'):
+        for var in ('QT_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH'):
+            os.environ.pop(var, None)
+
     app.setStyle("Fusion")
 
     

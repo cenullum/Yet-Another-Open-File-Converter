@@ -51,7 +51,7 @@ or download appimage from releases page.
 
 ## How to build
 
-Use `build_appimage.sh` to build appimage for Linux.
+Use `build_appimage_docker.sh` to build appimage for Linux (recommended for releases). It runs `build_appimage.sh` inside an Ubuntu 22.04 container, so the AppImage runs on older distros too. Running `build_appimage.sh` directly ties the AppImage to your host's glibc version.
 Use `build_windows.bat` to build executable for Windows.
 
 ## Support
